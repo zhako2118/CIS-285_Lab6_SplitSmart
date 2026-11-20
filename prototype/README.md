@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SplitSmart Prototype (CIS 285 Lab 9)
 
-## Getting Started
+A web prototype for sharing expenses within groups. Built with Next.js 15 (App Router), React 19,
+TypeScript, Tailwind CSS 4, Prisma 6, and SQLite.
 
-First, run the development server:
+## Features
+
+| Req | Feature |
+| --- | --- |
+| FR1 | Create groups and pick one from the dashboard cards or the sidebar (pills on mobile) |
+| FR2 | Add members to a group. Empty names, duplicate names, and invalid group IDs are rejected |
+| FR3 | Record an expense with a description, a positive amount, a payer, participants, and a date. It is split equally in integer cents |
+| FR4 | Expense history for each group (description, amount, payer, participants with shares, date), stored in SQLite |
+| FR5 | Net balance per member (paid minus share), color-coded. Balances always sum to $0.00 |
+
+### Money rules
+- Amounts are parsed from text into **integer cents** without floating-point math. Zero,
+  negative, non-numeric, and >2-decimal amounts are rejected, and so is anything over $1,000,000.
+- **Equal split with a set remainder rule:** each participant gets `floor(amount / n)` cents.
+  The leftover `amount % n` cents go one each to the participants with the **lowest member IDs**.
+  Example: $10.00 split three ways gives 334 + 333 + 333 = 1000 cents.
+- Each participant's share is saved (`ExpenseShare`), so a later change to the split rule won't
+  rewrite past expenses.
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env          # DATABASE_URL="file:./dev.db" (creates prisma/dev.db)
+npm install                   # installs from package-lock.json
+npx prisma migrate deploy     # applies prisma/migrations (non-destructive)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Run
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run dev                   # http://localhost:3000 (development)
+npm run build && npm start    # production
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Quality checks
 
-## Learn More
+```bash
+npm run lint
+npm run typecheck
+npm test                      # Vitest: unit + Prisma integration tests
+```
 
-To learn more about Next.js, take a look at the following resources:
+Integration tests run against a separate database, `prisma/test.db`, which is rebuilt from
+migrations each run. They never touch `dev.db`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+src/lib/money.ts          Pure money logic: parsing, equal split, balances (no DB/UI)
+src/lib/validation.ts     Input validation (IDs, names, dates, participants)
+src/lib/splitsmart.ts     Server-side service layer (all Prisma access)
+src/app/api/groups/...    JSON API route handlers
+src/app/...               Server-rendered pages + loading / error / not-found states
+src/components/...        UI components (client forms, balances, history)
+tests/                    Vitest suites
+```
 
-## Deploy on Vercel
+### API
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Method | Path | Body |
+| --- | --- | --- |
+| GET | `/api/groups` | — |
+| POST | `/api/groups` | `{ "name": "Trip" }` |
+| GET | `/api/groups/:id` | — (members, expenses, balances) |
+| POST | `/api/groups/:id/members` | `{ "name": "Alice" }` |
+| POST | `/api/groups/:id/expenses` | `{ "description", "amount": "60.00", "payerId", "participantIds": [..], "date"?: "YYYY-MM-DD" }` |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Validation errors return `400` (`404` for an unknown group, `409` for a duplicate member) with
+`{ "error": string, "field"?: string }`.
+
+## Out of scope (by design)
+Authentication, payments/settlements, approvals, notifications, percentage splits, receipts, and
+editing or deleting expenses and members.
